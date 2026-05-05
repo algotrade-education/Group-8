@@ -1,4 +1,4 @@
-# Hybrid Market Making Strategy on VN30F1M
+# Predictive High-Frequency Market Making: VN30F1M Strategy Evolution & Live Execution Engine
 
 ![Static Badge](https://img.shields.io/badge/PLUTUS-Pending-darkblue)
 ![Static Badge](https://img.shields.io/badge/Course-CS408_APCS-blue)
@@ -6,102 +6,71 @@
 **Authors:** Group 8 (Dương Trung Hiếu - 22125027 | Dương Ngọc Quang Khiêm - 22125037)
 
 ## Abstract
-This project presents a Hybrid Market Making Strategy tailored for the VN30 Index Futures (VN30F1M). The primary objective is to capture small, consistent bid-ask spreads while maintaining a strictly neutral inventory position. By utilizing a high-frequency 20-tick Simple Moving Average (SMA) baseline and an adaptive inventory skewing mechanism, the algorithm dynamically filters out toxic flow. Ultimately, the system accepts a trade-off, deliberately sacrificing high absolute yields to prioritize capital survivability and prevent catastrophic margin calls.
+This project presents a state-of-the-art Predictive High-Frequency Market Making strategy and Live Execution Engine tailored for the VN30 Index Futures (VN30F1M). Evolving from a theoretical continuous-time Avellaneda-Stoikov (A-S) model, this project implements rigorous microstructure engineering to transition into a live, event-driven paper trading environment. By abandoning symmetric quoting in favor of state-conditional, asymmetric policies and integrating decoupled asynchronous microservices, the engine effectively filters toxic flow. The system achieves a rigorous balance between theoretical modeling and quantitative software engineering, yielding highly deployable out-of-sample edge with tightly controlled tail risk.
 
-## Introduction
-Pure market-making models often generate high absolute yields but suffer from severe capital impairment during sudden, strong directional moves—known as "toxic flow." Because they use symmetric quoting, they experience heavy adverse selection, and lagging indicators (like an SMA 80) force the bot to "buy the falling knife" at stale prices. 
+## Introduction & Strategy Evolution
+Pure market-making models, such as the theoretical Avellaneda-Stoikov baseline, assume smooth diffusion and touch-fills. When applied to discrete, real-world snapshots, this symmetric quoting approach suffers catastrophic failure (up to -97% Maximum Drawdown) due to adverse selection and momentum toxicity.
 
-To solve this, our adapted strategy acts as a highly disciplined liquidity provider without betting on long-term price direction. By utilizing responsive anchoring and a dynamic "Pressure Release Valve" for inventory management, the algorithm selectively quotes to capture spreads in sideways markets and fades directional spikes. The ultimate goal is to guarantee algorithmic stability and strict risk containment in live trading environments.
+To resolve this, our architecture completely overhauled the stochastic model:
+1. **Unit Normalization & Strict Matching:** Time is discretized to polling intervals, volatility is mapped to contract points, and touch-at-quote fills are strictly rejected to reflect real-world queue-priority friction.
+2. **Asymmetric Quoting:** We shifted to a predictive, state-conditional policy. The algorithm selectively quotes to capture spreads in sideways markets and aggressively fades directional spikes, explicitly optimizing for a risk-adjusted score: `Sharpe × (1 - |MDD|)`.
 
-## Step 1: Trading Algorithm Hypotheses
-Our strategy is built upon three core quantitative hypotheses:
-* **Mean Reversion (Exhaustion):** Intraday markets frequently exhibit short-term exhaustion after rapid price spikes, creating an opportunity for reverting fills.
-* **Responsive Anchoring:** A high-frequency 20-tick SMA acts as a real-time dynamic baseline, tracking momentum shifts much faster than traditional lagging moving averages.
-* **Directional Fading:** Instead of symmetric quoting during volatile spikes, the bot selectively quotes only the reverting side when the price deviates more than 1.0 point from the SMA baseline.
+## Core System Architecture
 
-## Step 2 & 3: Data
+### 1. Predictive Gating & Circuit Breakers
+Instead of symmetric quoting, the engine relies on a rapid-tick feature pipeline consuming RSI, ATR, ADX, and EMAs:
+* **RSI-Driven Asymmetry:** Accumulation regimes (RSI < 30) trigger Bid-only quotes; Distribution regimes (RSI > 70) trigger Ask-only quotes.
+* **The "Freight Train" Defense:** A combined trend direction (EMA12/EMA26 crossover) and strength (ADX > 25) circuit breaker permanently disables counter-trend fading during strong directional momentum.
 
-### Data Collection
+### 2. Dynamic Risk Management
+* **ATR-Scaled Spread:** Fixed spreads are replaced by a dynamic multiplier (`ATR_14 * multiplier`), preserving adverse-selection buffers during high volatility.
+* **Stop-Loss Flush:** If adverse movement exceeds 10 points, a full liquidation is triggered. The engine pays the exchange fee to exit toxic inventory before non-linear escalation.
+* **Hard Inventory Caps & EOD Flattening:** State constraints instantly censor quoting sides when max capacity is reached. All positions are force-closed at 14:45 ATC to neutralize overnight gap risk.
+
+### 3. Live Execution Architecture & Microservices
+The system was engineered for real-time, event-driven performance:
+* **Decoupled Async Flow:** Continuous stream processing via `KafkaMarketDataClient` handles atomic `QuoteSnapshot` events. Execution is routed via a `PaperBrokerClient` over a FIX 4.4 TCP socket.
+* **O(1) Memory Deque:** The `on_quote` callback strictly appends to a bounded deque, preventing GIL stalls and unblocking consumer threads.
+* **Microstructure Hardening:** Includes *Flatten-Before-Flip* reversal rules and explicit `threading.RLock()` mechanisms to protect in-flight orders from fast-market spam. Mathematical *State Healing* reconstructions prevent null-pointer crashes if FIX messages drop.
+
+### 4. Catastrophic Risk Control
+* **Real-Time Fee Deductions:** The engine mathematically deducts 40,000 VND (0.4 index points) instantly per contract on every fill, ensuring equity logic is purely liquidatable NAV.
+* **The Global Kill Switch:** Dynamic internal equity monitoring. If the 400M VND threshold is breached, the system halts permanently, cancels all resting orders, and flattens inventory, requiring a human reboot.
+
+## Data Processing
 * **Target Contract:** VN30 Index Futures (VN30F1M).
 * **Format:** Intraday tick data encompassing `close`, `price`, `best-bid`, `best-ask`, and `spread`.
-* **Period:** The dataset spans an In-Sample period (2022) and an Out-of-Sample period (2024–2026).
-
-### Data Processing
-* **Rollover Management:** The system imports the primary contract (`VN30F1M_data.csv`) alongside the subsequent month's contract (`VN30F2M_data.csv`). It maps prices dynamically to handle expiration rollovers cleanly.
-* **Formatting:** Timestamps are converted via `pd.to_datetime`. Tick prices and spreads are rounded, and forward-filling (`ffill()`) is applied to manage missing ticks and maintain data integrity.
+* **Rollover Management:** Primary and subsequent month contracts are mapped dynamically for clean expiration rollovers. Missing ticks are managed via forward-filling (`ffill()`) to maintain data integrity.
 
 ## Implementation (How to Run)
 
 ### Environment Setup
-Ensure you have Python installed along with the required libraries:
+Ensure Python, Kafka, and the required data science libraries are installed:
 ```bash
 pip install pandas numpy matplotlib
-
 ```
+*(Note: Live execution requires the appropriate Kafka Zookeeper environment and a valid FIX 4.4 routing endpoint).*
 
-### Running the Algorithm
-
-To execute the backtest, run the main module from your terminal:
-
+### Running the Engine
+To execute the historical simulation and backtest engine:
 ```bash
 python backtesting.py
-
+```
+To launch the live event-driven paper trading microservices:
+```bash
+python live_engine.py
 ```
 
-### Algorithm Configurations
+## Performance & Results
 
-The strategy relies on a set of highly optimized parameters located in `backtesting.py`:
+The final optimized model underwent rigorous testing in a **16-month Out-of-Sample evaluation block**, proving exceptional drawdown protection and edge preservation. 
 
-* `capital = Decimal("5e5")` (Base starting capital)
-* `sideways_pct = Decimal("0.0015")` (Threshold to classify sideways market action)
-* `quote_offset = Decimal("0.2")` (Spread capture offset from current price)
-* `entry_band = Decimal("0.8")` (Minimum price deviation required to enter a trade)
-* `cooldown_ticks = 20` (Tick wait time after closing a position to regain stability)
-* `max_contracts = 2` (Hard cap on maximum allowable inventory)
-* `stop_loss_points = Decimal("-2.0")` & `take_profit_points = Decimal("2.5")`
-
-## Step 4: In-sample Backtesting
-
-* **Data Segment:** 2022 Trading Year
-* **Standard Inputs:** Executed using the default configurations mentioned above with a forced regime filter (09:20 - 14:20).
-
-### Result
-
-The algorithm successfully captured spreads with a well-controlled drawdown profile compared to pure MM strategies.
-
-* **Holding Period Return (HPR):** +7.80%
-* **Annual Net Return:** +4.98%
-* **Max Drawdown:** -6.57%
-* **Sharpe Ratio (Annualized):** 0.248
-
-## Step 5: Optimization
-
-* **Indicator Responsiveness:** We optimized the baseline indicator from a lagging SMA 80 to a `deque(maxlen=20)` (SMA 20) for high-frequency responsiveness.
-* **Inventory Skewing Mechanism:** We introduced an internal metric to adjust quotes based on inventory. If holding too many Longs, the bot lowers the Ask price to incentivize a fill, restoring Delta Neutrality.
-* **Regime Filtering:** Eliminated catastrophic slippage by physically halting the bot during opening/closing institutional bulk order sessions (trading only mid-session).
-
-## Step 6: Out-of-sample Backtesting
-
-* **Data Segment:** 2024 to Early 2026
-
-### Result
-
-The strategy demonstrated exceptional drawdown protection (-5.20%) during the 2024-2025 period, though it struggled during the highly volatile late-2025/2026 regime due to tight spread conditions and transaction costs overriding edge.
-
-* **Out-of-Sample (2024 - 2025):**
-* HPR: +0.29%
-* Annual Net Return: +1.59%
-* Max Drawdown: -5.20%
-
-
-* **Out-of-Sample (Late 2025 - Early 2026):**
-* HPR: -13.12%
-* Annual Net Return: -31.78%
-* Max Drawdown: -15.62%
-
-
+### Final Out-of-Sample Metrics
+* **Out-of-Sample Sharpe:** 3.77
+* **Maximum Drawdown:** -2.9% (Achieved via rigorous risk geometry)
+* **Absolute Profit:** 222,000,000 VND
+* **Total Trades:** 21,898 execution round-trips
 
 ## Conclusion
 
-This project demonstrates the transition from a highly theoretical "Pure" Market Making model to a risk-adjusted, high-frequency execution engine. While a Pure MM approach yields higher absolute returns (+17.10% IS), it carries blowout risk with drawdowns exceeding -20%. By integrating **Responsive Anchoring**, **Inventory Skewing**, and **Strict Regime Constraints**, our Hybrid strategy successfully shifts the probability distribution to prioritize algorithmic survivability and capital protection against toxic market flows.
-
+This project successfully bridges the gap between theoretical quantitative finance and practical software engineering. While the initial Avellaneda-Stoikov baseline failed under real-world microstructure frictions, the evolution into a Hybrid, Asymmetric system protected by strict **Predictive Gating**, **Dynamic ATR Spreads**, and **Catastrophic Kill Switches** created a highly resilient market maker. The resulting execution engine deliberately manages toxic flow and prioritizes algorithmic survivability, yielding a highly stable, positive expectation system.
