@@ -58,7 +58,7 @@ python backtesting.py
 ```
 To launch the live event-driven paper trading microservices:
 ```bash
-python live_engine.py
+python paper_trading.py
 ```
 
 ## Performance & Results
