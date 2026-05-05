@@ -16,7 +16,6 @@ venv/
 data/
 logs/
 deliverables/
-result/papertrading/
 
 # Local artifacts
 orders.db
