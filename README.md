@@ -11,6 +11,18 @@ This project presents a state-of-the-art Predictive High-Frequency Market Making
 ## Introduction & Strategy Evolution
 Pure market-making models, such as the theoretical Avellaneda-Stoikov baseline, assume smooth diffusion and touch-fills. When applied to discrete, real-world snapshots, this symmetric quoting approach suffers catastrophic failure (up to -97% Maximum Drawdown) due to adverse selection and momentum toxicity.
 
+### Brief Comparison: Teacher's Model vs. Pure Avellaneda-Stoikov
+* **Spread control:** Pure A-S uses volatility in the spread ($\sigma^2$), which swings wildly tick-to-tick; the teacher's model fixes a hard step (e.g., 1.8 points), avoiding over-tight or unfillable quotes.
+* **Inventory penalty:** Pure A-S skews with $q\gamma\sigma^2(T-t)$, which can explode near session end; the teacher's model uses a stable scalar like $q\times 0.02$, keeping quotes in range.
+* **Fill assumptions:** Pure A-S required strict matching; the teacher's backtester uses touch-fills (e.g., `bid >= price`), which is optimistic and boosts backtest PnL.
+
+| Metric | Our Market Making (Complete) | Teacher's Market Making |
+| --- | --- | --- |
+| Profit | 222,000,000 VND | 40,100,000 VND |
+| Sharpe | 3.77 | 0.082 |
+| Maximum Drawdown | -2.9% | -10.29% |
+| Total Trades | 21,898 | N/A |
+
 To resolve this, our architecture completely overhauled the stochastic model:
 1. **Unit Normalization & Strict Matching:** Time is discretized to polling intervals, volatility is mapped to contract points, and touch-at-quote fills are strictly rejected to reflect real-world queue-priority friction.
 2. **Asymmetric Quoting:** We shifted to a predictive, state-conditional policy. The algorithm selectively quotes to capture spreads in sideways markets and aggressively fades directional spikes, explicitly optimizing for a risk-adjusted score: `Sharpe × (1 - |MDD|)`.
@@ -70,6 +82,21 @@ The final optimized model underwent rigorous testing in a **16-month Out-of-Samp
 * **Maximum Drawdown:** -2.9% (Achieved via rigorous risk geometry)
 * **Absolute Profit:** 222,000,000 VND
 * **Total Trades:** 21,898 execution round-trips
+
+### Paper Trading Data & Figures
+* **Analytics data:** [result/papertrading/analytics_history.csv](result/papertrading/analytics_history.csv)
+
+**Price Path**
+![Paper trading price](result/papertrading/price.svg)
+
+**Inventory Over Time**
+![Paper trading inventory](result/papertrading/inventory.svg)
+
+**Holdings Period Return (HPR)**
+![Paper trading HPR](result/papertrading/hpr.svg)
+
+**Drawdown Curve**
+![Paper trading drawdown](result/papertrading/drawdown.svg)
 
 ## Conclusion
 
